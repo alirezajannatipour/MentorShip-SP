@@ -1,16 +1,47 @@
+import os
 from typing import List, Optional
+from dotenv import load_dotenv
 
-from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel, Field, field_validator
+from fastapi import FastAPI, Depends, HTTPException
+from pydantic import BaseModel, Field, field_validator, ConfigDict
+from sqlalchemy import create_engine, Column, Integer, String, Text
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import sessionmaker, Session
+
+load_dotenv()
+
+DATABASE_URL = os.getenv("DATABASE_URL")
+
+engine = create_engine(DATABASE_URL)
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+Base = declarative_base()
+
+
+class BookModel(Base):
+    __tablename__ = "books"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    title = Column(String(150), nullable=False)
+    author = Column(String(100), nullable=False)
+    year = Column(Integer, nullable=False)
+    summary = Column(Text, nullable=True)
+
+
+Base.metadata.create_all(bind=engine)
 
 app = FastAPI(
     title="Library API",
-    description="A simple in-memory library management API built with FastAPI.",
+    description="A PostgreSQL-backed library management API built with FastAPI using secure environment variables.",
     version="1.0.0",
 )
 
-books_db: List[dict] = []
-current_id = 1
+
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
 
 
 class BookCreate(BaseModel):
@@ -36,6 +67,7 @@ class BookUpdate(BaseModel):
 
 class Book(BookCreate):
     id: int
+    model_config = ConfigDict(from_attributes=True)
 
 
 class BookResponse(BaseModel):
@@ -43,41 +75,54 @@ class BookResponse(BaseModel):
     book: Book
 
 
-def find_book(book_id: int) -> dict:
-    for book in books_db:
-        if book["id"] == book_id:
-            return book
-    raise HTTPException(status_code=404, detail="Book not found")
+def find_book_or_404(db: Session, book_id: int) -> BookModel:
+    book = db.query(BookModel).filter(BookModel.id == book_id).first()
+    if not book:
+        raise HTTPException(status_code=404, detail="Book not found")
+    return book
 
 
 @app.get("/books", response_model=List[Book])
-def get_books():
-    return books_db
+def get_books(db: Session = Depends(get_db)):
+    books = db.query(BookModel).all()
+    return books
 
 
 @app.post("/books", status_code=201, response_model=BookResponse)
-def create_book(book: BookCreate):
-    global current_id
-    new_book = {"id": current_id, **book.model_dump()}
-    books_db.append(new_book)
-    current_id += 1
+def create_book(book: BookCreate, db: Session = Depends(get_db)):
+    new_book = BookModel(
+        title=book.title,
+        author=book.author,
+        year=book.year,
+        summary=book.summary
+    )
+    db.add(new_book)
+    db.commit()
+    db.refresh(new_book)
     return {"message": "Book created successfully", "book": new_book}
 
 
 @app.get("/books/{book_id}", response_model=Book)
-def get_book(book_id: int):
-    return find_book(book_id)
+def get_book(book_id: int, db: Session = Depends(get_db)):
+    return find_book_or_404(db, book_id)
 
 
 @app.patch("/books/{book_id}", response_model=BookResponse)
-def update_book(book_id: int, book_update: BookUpdate):
-    book = find_book(book_id)
-    book.update(book_update.model_dump(exclude_unset=True))
+def update_book(book_id: int, book_update: BookUpdate, db: Session = Depends(get_db)):
+    book = find_book_or_404(db, book_id)
+    
+    update_data = book_update.model_dump(exclude_unset=True)
+    for key, value in update_data.items():
+        setattr(book, key, value)
+        
+    db.commit()
+    db.refresh(book)
     return {"message": "Book updated successfully", "book": book}
 
 
 @app.delete("/books/{book_id}", response_model=BookResponse)
-def delete_book(book_id: int):
-    book = find_book(book_id)
-    books_db.remove(book)
+def delete_book(book_id: int, db: Session = Depends(get_db)):
+    book = find_book_or_404(db, book_id)
+    db.delete(book)
+    db.commit()
     return {"message": "Book deleted successfully", "book": book}
