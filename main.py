@@ -1,31 +1,11 @@
-import os
 from typing import List, Optional
-from dotenv import load_dotenv
 
 from fastapi import FastAPI, Depends, HTTPException
 from pydantic import BaseModel, Field, field_validator, ConfigDict
-from sqlalchemy import create_engine, Column, Integer, String, Text
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker, Session
+from sqlalchemy.orm import Session
 
-load_dotenv()
-
-DATABASE_URL = os.getenv("DATABASE_URL")
-
-engine = create_engine(DATABASE_URL)
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-Base = declarative_base()
-
-
-class BookModel(Base):
-    __tablename__ = "books"
-
-    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
-    title = Column(String(150), nullable=False)
-    author = Column(String(100), nullable=False)
-    year = Column(Integer, nullable=False)
-    summary = Column(Text, nullable=True)
-
+from database import Base, engine, get_db
+from models import BookModel  # must be imported before create_all so the table is registered
 
 Base.metadata.create_all(bind=engine)
 
@@ -36,24 +16,16 @@ app = FastAPI(
 )
 
 
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
-
-
 class BookCreate(BaseModel):
-    title: str = Field(min_length=1)
-    author: str = Field(min_length=1)
+    title: str = Field(min_length=1, max_length=150)
+    author: str = Field(min_length=1, max_length=100)
     year: int = Field(gt=0)
     summary: Optional[str] = None
 
 
 class BookUpdate(BaseModel):
-    title: Optional[str] = Field(default=None, min_length=1)
-    author: Optional[str] = Field(default=None, min_length=1)
+    title: Optional[str] = Field(default=None, min_length=1, max_length=150)
+    author: Optional[str] = Field(default=None, min_length=1, max_length=100)
     year: Optional[int] = Field(default=None, gt=0)
     summary: Optional[str] = None
 
@@ -84,8 +56,7 @@ def find_book_or_404(db: Session, book_id: int) -> BookModel:
 
 @app.get("/books", response_model=List[Book])
 def get_books(db: Session = Depends(get_db)):
-    books = db.query(BookModel).all()
-    return books
+    return db.query(BookModel).order_by(BookModel.id).all()
 
 
 @app.post("/books", status_code=201, response_model=BookResponse)
@@ -94,7 +65,7 @@ def create_book(book: BookCreate, db: Session = Depends(get_db)):
         title=book.title,
         author=book.author,
         year=book.year,
-        summary=book.summary
+        summary=book.summary,
     )
     db.add(new_book)
     db.commit()
@@ -110,11 +81,11 @@ def get_book(book_id: int, db: Session = Depends(get_db)):
 @app.patch("/books/{book_id}", response_model=BookResponse)
 def update_book(book_id: int, book_update: BookUpdate, db: Session = Depends(get_db)):
     book = find_book_or_404(db, book_id)
-    
+
     update_data = book_update.model_dump(exclude_unset=True)
     for key, value in update_data.items():
         setattr(book, key, value)
-        
+
     db.commit()
     db.refresh(book)
     return {"message": "Book updated successfully", "book": book}
