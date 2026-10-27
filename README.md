@@ -118,14 +118,6 @@ uvicorn main:app --reload
 | 422 | داده‌های ورودی نامعتبر است (خطای اعتبارسنجی Pydantic) |
 
 ```
-
----
-
-### چکار کنی؟
-1. محتوای فایل `README.md` رو با متن بالا جایگزین کن و ذخیره‌ش کن.
-2. بعد برای اینکه روی گیت‌هاب هم آپدیت بشه، توی ترمینال این دستورات رو بزن:
-   ```bash
-   git add README.md
    git commit -m "Update README.md with PostgreSQL and modular architecture details"
    git push
 
