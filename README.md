@@ -116,9 +116,3 @@ uvicorn main:app --reload
 | --- | --- |
 | 404 | کتابی با این شناسه در دیتابیس پیدا نشد |
 | 422 | داده‌های ورودی نامعتبر است (خطای اعتبارسنجی Pydantic) |
-
-```
-   git commit -m "Update README.md with PostgreSQL and modular architecture details"
-   git push
-
-```
